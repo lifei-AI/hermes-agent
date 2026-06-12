@@ -92,11 +92,18 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     if agent.load_soul_identity or not agent.skip_context_files:
         _soul_content = _r.load_soul_md()
         if _soul_content:
+            import logging as _lg
+            _lg.getLogger("hermes").debug("[DEBUG build_system_prompt_parts] SOUL.md LOADED SUCCESSFULLY, len=%d", len(_soul_content))
             stable_parts.append(_soul_content)
             _soul_loaded = True
+        else:
+            import logging as _lg
+            _lg.getLogger("hermes").debug("[DEBUG build_system_prompt_parts] load_soul_md() returned None")
 
     if not _soul_loaded:
         # Fallback to hardcoded identity
+        import logging as _lg
+        _lg.getLogger("hermes").debug("[DEBUG build_system_prompt_parts] FALLING BACK to DEFAULT_AGENT_IDENTITY")
         stable_parts.append(DEFAULT_AGENT_IDENTITY)
 
     # Pointer to the hermes-agent skill + docs for user questions about Hermes itself.

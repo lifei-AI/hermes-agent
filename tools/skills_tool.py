@@ -611,6 +611,20 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
     # Load disabled set once (not per-skill)
     disabled = set() if skip_disabled else _get_disabled_skill_names()
 
+    # PA 场景：从 skill.yaml 读取用户选中的技能 ID，加上始终可用的元技能
+    _META_IDS = {"sk_manage_avatars", "sk_manage_skills", "sk_manage_knowledge",
+                 "sk_find_resources", "sk_data_analysis"}
+    _allowed_ids: set | None = None
+    _skill_yaml = SKILLS_DIR / "skill.yaml"
+    if _skill_yaml.exists():
+        try:
+            import yaml as _yaml
+            _entries = _yaml.safe_load(_skill_yaml.read_text(encoding="utf-8")) or []
+            _allowed_ids = {e["id"] for e in _entries if isinstance(e, dict) and "id" in e}
+            _allowed_ids |= _META_IDS
+        except Exception:
+            pass
+
     # Scan local dir first, then external dirs (local takes precedence)
     dirs_to_scan = []
     if SKILLS_DIR.exists():
@@ -623,6 +637,11 @@ def _find_all_skills(*, skip_disabled: bool = False) -> List[Dict[str, Any]]:
                 continue
 
             skill_dir = skill_md.parent
+
+            # 在 SKILLS_DIR 内按 skill.yaml 选中列表过滤（允许元技能通过）
+            if scan_dir == SKILLS_DIR and _allowed_ids is not None:
+                if skill_dir.name not in _allowed_ids:
+                    continue
 
             try:
                 content = skill_md.read_text(encoding="utf-8")[:4000]
@@ -1052,6 +1071,20 @@ def skill_view(
             for found_md in search_dir.rglob(f"{name}.md"):
                 if found_md.name != "SKILL.md":
                     _record(None, found_md)
+
+        # Strategy 4: fallback — search by frontmatter 'name' field when no
+        # other strategy matched. Allows skill_view("显示名称") to work even
+        # when the directory is named by ID (e.g., sk_c60779c1).
+        if not candidates:
+            for search_dir in all_dirs:
+                for found_skill_md in iter_skill_index_files(search_dir, "SKILL.md"):
+                    try:
+                        fm_content = found_skill_md.read_text(encoding="utf-8")
+                        fm, _ = _parse_frontmatter(fm_content)
+                        if fm.get("name") == name:
+                            _record(found_skill_md.parent, found_skill_md)
+                    except Exception:
+                        pass
 
         if len(candidates) > 1:
             paths = [str(smd) for _, smd in candidates]

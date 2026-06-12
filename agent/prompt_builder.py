@@ -1156,6 +1156,13 @@ def build_skills_system_prompt(
         or ""
     )
     disabled = get_disabled_skill_names()
+    _skill_yaml = skills_dir / "skill.yaml"
+    _skill_yaml_stat: "tuple | None" = None
+    try:
+        _st = _skill_yaml.stat()
+        _skill_yaml_stat = (_st.st_mtime_ns, _st.st_size)
+    except OSError:
+        pass
     cache_key = (
         str(skills_dir.resolve()),
         tuple(str(d) for d in external_dirs),
@@ -1164,6 +1171,7 @@ def build_skills_system_prompt(
         _platform_hint,
         tuple(sorted(disabled)),
         tuple(sorted(compact_categories or ())),
+        _skill_yaml_stat,
     )
     with _SKILLS_PROMPT_CACHE_LOCK:
         cached = _SKILLS_PROMPT_CACHE.get(cache_key)
@@ -1174,6 +1182,22 @@ def build_skills_system_prompt(
     # ── Layer 2: disk snapshot ────────────────────────────────────────
     snapshot = _load_skills_snapshot(skills_dir)
 
+    # ── skill.yaml allow-list (PA / avatar mode) ──────────────────────
+    # When SKILLS_DIR contains a skill.yaml, only show skills listed there
+    # plus the 5 hardcoded META skills.  Without skill.yaml (default Hermes
+    # home) every skill in the directory is shown as before.
+    _META_IDS = {"sk_manage_avatars", "sk_manage_skills", "sk_manage_knowledge",
+                 "sk_find_resources", "sk_data_analysis"}
+    _allowed_ids: "set | None" = None
+    if _skill_yaml.exists():
+        try:
+            import yaml as _yaml
+            _yaml_entries = _yaml.safe_load(_skill_yaml.read_text(encoding="utf-8")) or []
+            _allowed_ids = {e["id"] for e in _yaml_entries if isinstance(e, dict) and "id" in e}
+            _allowed_ids |= _META_IDS
+        except Exception:
+            pass
+
     skills_by_category: dict[str, list[tuple[str, str]]] = {}
     category_descriptions: dict[str, str] = {}
 
@@ -1183,6 +1207,8 @@ def build_skills_system_prompt(
             if not isinstance(entry, dict):
                 continue
             skill_name = entry.get("skill_name") or ""
+            if _allowed_ids is not None and skill_name not in _allowed_ids:
+                continue
             category = entry.get("category") or "general"
             frontmatter_name = entry.get("frontmatter_name") or skill_name
             platforms = entry.get("platforms") or []
@@ -1213,6 +1239,8 @@ def build_skills_system_prompt(
             if not is_compatible:
                 continue
             skill_name = entry["skill_name"]
+            if _allowed_ids is not None and skill_name not in _allowed_ids:
+                continue
             if entry["frontmatter_name"] in disabled or skill_name in disabled:
                 continue
             if not _skill_should_show(
@@ -1480,12 +1508,17 @@ def load_soul_md() -> Optional[str]:
         logger.debug("Could not ensure HERMES_HOME before loading SOUL.md: %s", e)
 
     soul_path = get_hermes_home() / "SOUL.md"
+    logger.debug("[DEBUG load_soul_md] get_hermes_home() = %s, soul_path = %s, exists = %s",
+                 get_hermes_home(), soul_path, soul_path.exists())
     if not soul_path.exists():
+        logger.debug("[DEBUG load_soul_md] SOUL.md NOT FOUND at %s", soul_path)
         return None
     try:
         content = soul_path.read_text(encoding="utf-8").strip()
         if not content:
+            logger.debug("[DEBUG load_soul_md] SOUL.md is EMPTY")
             return None
+        logger.debug("[DEBUG load_soul_md] SOUL.md content loaded, first 100 chars: %s", content[:100])
         content = _scan_context_content(content, "SOUL.md")
         content = _truncate_content(content, "SOUL.md")
         return content
