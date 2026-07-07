@@ -990,8 +990,9 @@ def run_conversation(
             logging.debug(f"API Request - Model: {agent.model}, Messages: {len(messages)}, Tools: {len(agent.tools) if agent.tools else 0}")
             logging.debug(f"Last message role: {messages[-1]['role'] if messages else 'none'}")
             logging.debug(f"Total message size: ~{approx_tokens:,} tokens")
-        
+
         api_start_time = time.time()
+        agent._perf_api_start_time = api_start_time  # avatar 侧探针：LLM API 调用起始时刻
         retry_count = 0
         max_retries = agent._api_max_retries
         _retry = TurnRetryState()
