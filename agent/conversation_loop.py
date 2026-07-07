@@ -408,6 +408,7 @@ def run_conversation(
     # ``build_turn_context``.  It mutates ``agent`` exactly as the inline code
     # did and returns the locals the loop below reads back.  See
     # ``agent/turn_context.py``.
+    _t_build_ctx_start = time.time()
     _ctx = build_turn_context(
         agent,
         user_message,
@@ -993,6 +994,9 @@ def run_conversation(
 
         api_start_time = time.time()
         agent._perf_api_start_time = api_start_time  # avatar 侧探针：LLM API 调用起始时刻
+        # avatar 侧细分探针
+        agent._perf_d_build_ctx = round(_t_build_ctx_start and (time.time() - _t_build_ctx_start), 3) or 0
+        agent._perf_d_pre_api = round(api_start_time - (_t_build_ctx_start or api_start_time), 3)
         retry_count = 0
         max_retries = agent._api_max_retries
         _retry = TurnRetryState()
