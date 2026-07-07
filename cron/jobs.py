@@ -34,15 +34,23 @@ except ImportError:
 # Configuration
 # =============================================================================
 
-HERMES_DIR = get_hermes_home().resolve()
-CRON_DIR = HERMES_DIR / "cron"
-JOBS_FILE = CRON_DIR / "jobs.json"
+# Path helpers: resolve dynamically via ContextVar so multi-tenant deployments
+# work without importlib.reload() under a global lock.
+def _hermes_dir() -> Path:
+    return get_hermes_home().resolve()
+
+def _cron_dir() -> Path:
+    return _hermes_dir() / "cron"
+
+def _jobs_file() -> Path:
+    return _cron_dir() / "jobs.json"
 
 # In-process lock protecting load_jobs→modify→save_jobs cycles.
 # Required when tick() runs jobs in parallel threads — without this,
 # concurrent mark_job_run / advance_next_run calls can clobber each other.
 _jobs_file_lock = threading.Lock()
-OUTPUT_DIR = CRON_DIR / "output"
+def _output_dir() -> Path:
+    return _cron_dir() / "output"
 ONESHOT_GRACE_SECONDS = 120
 
 # Fields on a cron job that must never change after creation. ``id`` is used
@@ -65,7 +73,7 @@ def _job_output_dir(job_id: str) -> Path:
         raise ValueError(f"Invalid cron job id for output path: {job_id!r}")
     if Path(text).is_absolute() or Path(text).drive:
         raise ValueError(f"Invalid cron job id for output path: {job_id!r}")
-    return OUTPUT_DIR / text
+    return _output_dir() / text
 
 
 def _normalize_skill_list(skill: Optional[str] = None, skills: Optional[Any] = None) -> List[str]:
@@ -172,10 +180,10 @@ def _secure_file(path: Path):
 
 def ensure_dirs():
     """Ensure cron directories exist with secure permissions."""
-    CRON_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    _secure_dir(CRON_DIR)
-    _secure_dir(OUTPUT_DIR)
+    _cron_dir().mkdir(parents=True, exist_ok=True)
+    _output_dir().mkdir(parents=True, exist_ok=True)
+    _secure_dir(_cron_dir())
+    _secure_dir(_output_dir())
 
 
 # =============================================================================
@@ -423,19 +431,19 @@ def compute_next_run(schedule: Dict[str, Any], last_run_at: Optional[str] = None
 def load_jobs() -> List[Dict[str, Any]]:
     """Load all jobs from storage."""
     ensure_dirs()
-    if not JOBS_FILE.exists():
+    if not _jobs_file().exists():
         return []
 
     _strict_retry = False  # track whether we used the strict=False fallback
 
     try:
-        with open(JOBS_FILE, 'r', encoding='utf-8') as f:
+        with open(_jobs_file(), 'r', encoding='utf-8') as f:
             data = json.load(f)
     except json.JSONDecodeError:
         # Retry with strict=False to handle bare control chars in string values
         _strict_retry = True
         try:
-            with open(JOBS_FILE, 'r', encoding='utf-8') as f:
+            with open(_jobs_file(), 'r', encoding='utf-8') as f:
                 data = json.loads(f.read(), strict=False)
         except Exception as e:
             logger.error("Failed to auto-repair jobs.json: %s", e)
@@ -471,14 +479,14 @@ def load_jobs() -> List[Dict[str, Any]]:
 def save_jobs(jobs: List[Dict[str, Any]]):
     """Save all jobs to storage."""
     ensure_dirs()
-    fd, tmp_path = tempfile.mkstemp(dir=str(JOBS_FILE.parent), suffix='.tmp', prefix='.jobs_')
+    fd, tmp_path = tempfile.mkstemp(dir=str(_jobs_file().parent), suffix='.tmp', prefix='.jobs_')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump({"jobs": jobs, "updated_at": _hermes_now().isoformat()}, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        atomic_replace(tmp_path, JOBS_FILE)
-        _secure_file(JOBS_FILE)
+        atomic_replace(tmp_path, _jobs_file())
+        _secure_file(_jobs_file())
     except BaseException:
         try:
             os.unlink(tmp_path)

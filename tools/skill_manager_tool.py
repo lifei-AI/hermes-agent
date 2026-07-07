@@ -105,8 +105,10 @@ import yaml
 
 
 # All skills live in ~/.hermes/skills/ (single source of truth)
-HERMES_HOME = get_hermes_home()
-SKILLS_DIR = HERMES_HOME / "skills"
+# Path helpers: resolve dynamically via ContextVar (get_hermes_home / get_skills_dir)
+# so multi-tenant deployments work without importlib.reload() under a global lock.
+def _skills_dir() -> Path:
+    return get_hermes_home() / "skills"
 
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
@@ -114,7 +116,7 @@ MAX_DESCRIPTION_LENGTH = 1024
 
 def _containing_skills_root(skill_path: Path) -> Path:
     """Return the skills root directory (local or external_dirs entry) that
-    contains ``skill_path``.  Falls back to the local ``SKILLS_DIR`` if no
+    contains ``skill_path``.  Falls back to the local skills dir if no
     match is found (defensive — callers should have located the skill via
     ``_find_skill`` first).
     """
@@ -131,7 +133,7 @@ def _containing_skills_root(skill_path: Path) -> Path:
             return root
         except (ValueError, OSError):
             continue
-    return SKILLS_DIR
+    return _skills_dir()
 
 
 def _pinned_guard(name: str) -> Optional[str]:
@@ -271,8 +273,8 @@ def _validate_content_size(content: str, label: str = "SKILL.md") -> Optional[st
 def _resolve_skill_dir(name: str, category: str = None) -> Path:
     """Build the directory path for a new skill, optionally under a category."""
     if category:
-        return SKILLS_DIR / category / name
-    return SKILLS_DIR / name
+        return _skills_dir() / category / name
+    return _skills_dir() / name
 
 
 def _find_skill(name: str) -> Optional[Dict[str, Any]]:
@@ -317,8 +319,8 @@ def _find_skill_in_other_profiles(name: str) -> List[Tuple[str, Path]]:
         return matches
 
     # Collect (profile_name, skills_dir) for every profile EXCEPT the
-    # one whose SKILLS_DIR we already searched in _find_skill().
-    active_dir = SKILLS_DIR.resolve() if SKILLS_DIR.exists() else SKILLS_DIR
+    # one whose skills dir we already searched in _find_skill().
+    active_dir = _skills_dir().resolve() if _skills_dir().exists() else _skills_dir()
     candidates: List[Tuple[str, Path]] = []
 
     # Default profile (~/.hermes/skills) — only consider when active is non-default.
@@ -527,7 +529,7 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
     result = {
         "success": True,
         "message": f"Skill '{name}' created.",
-        "path": str(skill_dir.relative_to(SKILLS_DIR)),
+        "path": str(skill_dir.relative_to(_skills_dir())),
         "skill_md": str(skill_md),
     }
     if category:

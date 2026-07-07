@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-DEFAULT_DB_PATH = get_hermes_home() / "state.db"
+def _default_db_path() -> Path:
+    """Resolve default state.db path dynamically via ContextVar."""
+    return get_hermes_home() / "state.db"
 
 SCHEMA_VERSION = 15
 
@@ -604,7 +606,7 @@ class SessionDB:
     _CHECKPOINT_EVERY_N_WRITES = 50
 
     def __init__(self, db_path: Path = None, read_only: bool = False):
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or _default_db_path()
         self.read_only = read_only
 
         self._lock = threading.Lock()

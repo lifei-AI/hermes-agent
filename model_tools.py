@@ -301,14 +301,37 @@ def get_tool_definitions(
     # user-visible config edits that affect dynamic schemas (execute_code
     # mode, discord action allowlist, etc.) without needing an explicit
     # invalidate hook on every config-writer.
+    #
+    # [2026-07-07] In multi-tenant (gateway) mode, HERMES_HOME is a ContextVar
+    # that changes per-user, so cfg_path differs for every request and the
+    # config fingerprint poisons the cache — every user gets a unique key,
+    # the cache never hits, and each thread recomputes the full tool surface
+    # (~4s). Since tool schemas don't vary by user (they depend only on
+    # enabled_toolsets + registry generation), we skip cfg_fp when a
+    # ContextVar override is active and use a fixed sentinel instead.
     if quiet_mode:
+        cfg_fp = None
         try:
-            from hermes_cli.config import get_config_path
-            cfg_path = get_config_path()
-            cfg_stat = cfg_path.stat()
-            cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
-        except (FileNotFoundError, OSError, ImportError):
-            cfg_fp = None
+            from hermes_constants import get_hermes_home_override
+            _is_multi_tenant = get_hermes_home_override() is not None
+        except ImportError:
+            _is_multi_tenant = False
+
+        if not _is_multi_tenant:
+            # Single-user (CLI) mode: config fingerprint ensures cache
+            # invalidation when the user edits config.yaml.
+            try:
+                from hermes_cli.config import get_config_path
+                cfg_path = get_config_path()
+                cfg_stat = cfg_path.stat()
+                cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
+            except (FileNotFoundError, OSError, ImportError):
+                cfg_fp = None
+        else:
+            # Multi-tenant (gateway) mode: tool schemas are identical across
+            # users, so a fixed sentinel allows cache sharing.
+            cfg_fp = "multi-tenant"
+
         cache_key = (
             frozenset(enabled_toolsets) if enabled_toolsets is not None else None,
             frozenset(disabled_toolsets) if disabled_toolsets else None,

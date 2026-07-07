@@ -97,13 +97,25 @@ _TERMINAL_CWD_SENTINELS = frozenset({"", ".", "./", "auto", "cwd"})
 
 
 def _configured_terminal_cwd() -> str | None:
-    """Return ``$TERMINAL_CWD`` only when it names a real directory anchor.
+    """Return the configured terminal cwd, preferring the per-session ContextVar.
 
-    Sentinel values (see ``_TERMINAL_CWD_SENTINELS``) and relative paths are
-    rejected — a relative anchor is meaningless without knowing which cwd it is
-    relative to, which is exactly the ambiguity that misroutes worktree edits.
-    Only an absolute, sentinel-free value is honored.
+    Resolution order:
+      1. ``_SESSION_CWD`` ContextVar (thread-isolated, set by multi-tenant gateways).
+      2. ``$TERMINAL_CWD`` environment variable (process-level fallback).
+
+    Sentinel values and relative paths are rejected — only an absolute,
+    sentinel-free value is honored.
     """
+    # [2026-07-07] Prefer _SESSION_CWD ContextVar for thread-safe cwd isolation.
+    try:
+        from agent.runtime_cwd import _session_cwd_override
+        session_cwd = _session_cwd_override()
+        if session_cwd:
+            expanded = os.path.expanduser(session_cwd)
+            if os.path.isabs(expanded):
+                return expanded
+    except Exception:
+        pass
     raw = (os.environ.get("TERMINAL_CWD") or "").strip()
     if raw.lower() in _TERMINAL_CWD_SENTINELS:
         return None
